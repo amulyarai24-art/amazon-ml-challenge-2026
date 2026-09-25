@@ -1,0 +1,14 @@
+data:
+  train_s1: "dataset/train/train_source1.tsv"
+  train_s2: "dataset/train/train_source2.tsv"
+  train_s3: "dataset/train/train_source3.tsv"
+  train_gt: "dataset/train/train_ground_truth.tsv"
+
+blocking:
+  max_candidates_per_entity: 100
+  exact_name_block: true
+  multilingual_postal_block: true
+
+cascade:
+  confidence_threshold: 0.72
+  margin_threshold: 0.18
