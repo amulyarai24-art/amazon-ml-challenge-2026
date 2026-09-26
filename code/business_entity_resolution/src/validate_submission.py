@@ -11,7 +11,7 @@ submission attempt.
 
 Usage
 -----
-python3 utils/validate_submission.py \\
+python3 src/validate_submission.py \\
     --matching output/matching_results.tsv \\
     --candidate output/candidate_pairs.tsv \\
     --test-dir dataset/test
