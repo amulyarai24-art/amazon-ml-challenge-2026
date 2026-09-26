@@ -87,28 +87,72 @@ def run_training_pipeline(train_dir: str, model_dir: str, epochs: int = 3, batch
         if sid in s1_rows and cid in s2_rows:
             positives.add((sid, cid))
 
-    X_rows, y_rows, raw_scores = [], [], []
+    X_rows, y_rows = [], []
+
+    # Positive examples come directly from the supplied ground truth.
     for sid, cid in positives:
-        feat = compute_structured_features(_rec(s1_rows[sid], name_s1, addr_s1, post_s1),
-                                           _rec(s2_rows[cid], name_s2, addr_s2, post_s2))
-        X_rows.append(feat); y_rows.append(1); raw_scores.append(float(feat[0]))
+        feat = compute_structured_features(
+            _rec(s1_rows[sid], name_s1, addr_s1, post_s1),
+            _rec(s2_rows[cid], name_s2, addr_s2, post_s2),
+        )
+        X_rows.append(feat)
+        y_rows.append(1)
+
+    # Deterministic real negative pairs. For each S1 record, sample non-matching
+    # S2 records while excluding every labelled positive for that S1.
+    rng = np.random.default_rng(42)
+    s2_ids = list(s2_rows.keys())
+    positive_by_s1 = {}
+    for sid, cid in positives:
+        positive_by_s1.setdefault(sid, set()).add(cid)
 
     for sid in s1_rows:
-        for cid in [x for x in s2_rows if (sid, x) not in positives][:2]:
-            feat = compute_structured_features(_rec(s1_rows[sid], name_s1, addr_s1, post_s1),
-                                               _rec(s2_rows[cid], name_s2, addr_s2, post_s2))
-            X_rows.append(feat); y_rows.append(0); raw_scores.append(float(feat[0]))
+        available = [cid for cid in s2_ids if cid not in positive_by_s1.get(sid, set())]
+        if not available:
+            continue
+        sample_size = min(2, len(available))
+        for cid in rng.choice(available, size=sample_size, replace=False):
+            feat = compute_structured_features(
+                _rec(s1_rows[sid], name_s1, addr_s1, post_s1),
+                _rec(s2_rows[cid], name_s2, addr_s2, post_s2),
+            )
+            X_rows.append(feat)
+            y_rows.append(0)
 
     if len(set(y_rows)) < 2:
         raise ValueError("Training ground truth must contain both positive and negative examples.")
 
-    X_train = np.asarray(X_rows, dtype=np.float32)
-    y_train = np.asarray(y_rows, dtype=np.int32)
-    lgb_save_path = os.path.join(model_dir, "lgbm_stage1_ranker.txt")
-    train_stage1_lightgbm(X_train, y_train, lgb_save_path)
+    X = np.asarray(X_rows, dtype=np.float32)
+    y = np.asarray(y_rows, dtype=np.int32)
 
+    # Hold out a deterministic validation slice so Person 3 can verify the
+    # matcher before using it on the real candidate_pairs.tsv.
+    from sklearn.model_selection import train_test_split
+    from sklearn.metrics import precision_score, recall_score, f1_score, fbeta_score
+
+    X_fit, X_val, y_fit, y_val = train_test_split(
+        X, y, test_size=0.20, random_state=42, stratify=y
+    )
+
+    lgb_save_path = os.path.join(model_dir, "lgbm_stage1_ranker.txt")
+    model = train_stage1_lightgbm(X_fit, y_fit, lgb_save_path)
+
+    val_raw_scores = model.predict(X_val)
+    val_pred = (val_raw_scores >= 0.5).astype(np.int32)
+    print(
+        "[VALIDATION] precision={:.4f} recall={:.4f} F1={:.4f} F0.5={:.4f}".format(
+            precision_score(y_val, val_pred, zero_division=0),
+            recall_score(y_val, val_pred, zero_division=0),
+            f1_score(y_val, val_pred, zero_division=0),
+            fbeta_score(y_val, val_pred, beta=0.5, zero_division=0),
+        )
+    )
+
+    # Calibrate the model's actual raw predictions, not an individual feature.
     calibrator_path = os.path.join(model_dir, "isotonic_calibrator.pkl")
-    fit_calibrator_from_training_data(raw_scores, y_train, Path(calibrator_path))
+    fit_calibrator_from_training_data(
+        val_raw_scores, y_val, Path(calibrator_path)
+    )
     print(f"[SUCCESS] Isotonic calibrator saved to {calibrator_path}")
 
     print("[INFO] Initializing Stage 2 Ditto Cross-Encoder Transformer & Focal Loss...")
