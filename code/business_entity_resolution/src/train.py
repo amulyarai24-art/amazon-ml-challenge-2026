@@ -48,6 +48,7 @@ def run_training_pipeline(train_dir: str, model_dir: str, epochs: int = 3, batch
 
     print("[INFO] Building training features from labelled S1-S2 pairs...")
     df_s2 = pl.read_csv(s2_path, separator="\t", ignore_errors=True)
+    df_s3 = pl.read_csv(s3_path, separator="\t", ignore_errors=True)
     df_gt = pl.read_csv(gt_path, separator="\t", ignore_errors=True)
 
     def _find_col(df, names):
@@ -59,12 +60,14 @@ def run_training_pipeline(train_dir: str, model_dir: str, epochs: int = 3, batch
     s1_id_col = _find_col(df_s1, ["entity_id", "id", "source1_entity_id"])
     s2_id_col = _find_col(df_s2, ["entity_id", "id", "source2_entity_id"])
     gt_s1_col = _find_col(df_gt, ["source1_entity_id", "entity_id", "id"])
-    gt_s2_col = _find_col(df_gt, ["source2_entity_id", "matched_entity_id", "entity_id_2", "id_2"])
-    if not all([s1_id_col, s2_id_col, gt_s1_col, gt_s2_col]):
-        raise ValueError("Could not identify entity-id columns in training files.")
+    gt_matches_col = _find_col(df_gt, ["matched_entity_ids", "matched_entity_id", "source2_entity_id"])
+    s3_id_col = _find_col(df_s3, ["entity_id", "id", "source3_entity_id"])
+    if not all([s1_id_col, s2_id_col, s3_id_col, gt_s1_col, gt_matches_col]):
+        raise ValueError("Could not identify required entity-id columns in training files.")
 
     s1_rows = {str(row[s1_id_col]): row for row in df_s1.to_dicts()}
     s2_rows = {str(row[s2_id_col]): row for row in df_s2.to_dicts()}
+    s3_rows = {str(row[s3_id_col]): row for row in df_s3.to_dicts()}
 
     name_s1 = _find_col(df_s1, ["name_norm", "name_normalized", "business_name", "company_name", "name"])
     name_s2 = _find_col(df_s2, ["name_norm", "name_normalized", "business_name", "company_name", "name"])
@@ -72,46 +75,61 @@ def run_training_pipeline(train_dir: str, model_dir: str, epochs: int = 3, batch
     addr_s2 = _find_col(df_s2, ["address_norm", "address_normalized", "business_address", "address"])
     post_s1 = _find_col(df_s1, ["postal", "postal_code", "zip", "postcode"])
     post_s2 = _find_col(df_s2, ["postal", "postal_code", "zip", "postcode"])
+    name_s3 = _find_col(df_s3, ["name_norm", "name_normalized", "business_name", "company_name", "name"])
+    addr_s3 = _find_col(df_s3, ["address_norm", "address_normalized", "business_address", "address"])
+    post_s3 = _find_col(df_s3, ["postal", "postal_code", "zip", "postcode"])
 
     def _rec(row, name_col, addr_col, post_col):
         return {"name_norm": row.get(name_col, "") if name_col else "",
                 "address_norm": row.get(addr_col, "") if addr_col else "",
                 "postal": row.get(post_col, "") if post_col else ""}
 
+    # The official ground truth stores comma-separated S2/S3 matches.
     positives = set()
+    positive_by_s1 = {}
     for row in df_gt.to_dicts():
-        sid, cid = str(row[gt_s1_col]), str(row[gt_s2_col])
-        if sid in s1_rows and cid in s2_rows:
-            positives.add((sid, cid))
+        sid = str(row[gt_s1_col])
+        raw_ids = str(row.get(gt_matches_col, "") or "")
+        matched_ids = [x.strip() for x in raw_ids.split(",") if x.strip()]
+        if sid not in s1_rows:
+            continue
+        positive_by_s1[sid] = set(matched_ids)
+        for cid in matched_ids:
+            if cid in s2_rows or cid in s3_rows:
+                positives.add((sid, cid))
 
     X_rows, y_rows = [], []
 
-    # Positive examples come directly from the supplied ground truth.
+    def _candidate_rec(cid):
+        if cid in s2_rows:
+            return _rec(s2_rows[cid], name_s2, addr_s2, post_s2)
+        if cid in s3_rows:
+            return _rec(s3_rows[cid], name_s3, addr_s3, post_s3)
+        return None
+
     for sid, cid in positives:
+        cand = _candidate_rec(cid)
+        if cand is None:
+            continue
         feat = compute_structured_features(
-            _rec(s1_rows[sid], name_s1, addr_s1, post_s1),
-            _rec(s2_rows[cid], name_s2, addr_s2, post_s2),
+            _rec(s1_rows[sid], name_s1, addr_s1, post_s1), cand
         )
         X_rows.append(feat)
         y_rows.append(1)
 
-    # Deterministic real negative pairs. For each S1 record, sample non-matching
-    # S2 records while excluding every labelled positive for that S1.
+    # Sample negatives from both S2 and S3 while excluding all known matches.
     rng = np.random.default_rng(42)
-    s2_ids = list(s2_rows.keys())
-    positive_by_s1 = {}
-    for sid, cid in positives:
-        positive_by_s1.setdefault(sid, set()).add(cid)
-
+    target_ids = list(s2_rows.keys()) + list(s3_rows.keys())
     for sid in s1_rows:
-        available = [cid for cid in s2_ids if cid not in positive_by_s1.get(sid, set())]
+        available = [cid for cid in target_ids if cid not in positive_by_s1.get(sid, set())]
         if not available:
             continue
-        sample_size = min(2, len(available))
-        for cid in rng.choice(available, size=sample_size, replace=False):
+        for cid in rng.choice(available, size=min(4, len(available)), replace=False):
+            cand = _candidate_rec(cid)
+            if cand is None:
+                continue
             feat = compute_structured_features(
-                _rec(s1_rows[sid], name_s1, addr_s1, post_s1),
-                _rec(s2_rows[cid], name_s2, addr_s2, post_s2),
+                _rec(s1_rows[sid], name_s1, addr_s1, post_s1), cand
             )
             X_rows.append(feat)
             y_rows.append(0)
