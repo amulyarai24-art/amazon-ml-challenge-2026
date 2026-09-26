@@ -3,6 +3,9 @@ __pycache__/
 venv/
 models/*.pt
 models/*.bin
+models/*.pkl
+models/*.txt
+models/*.json
 output/*.tsv
 !.gitkeep
 **/data/processed/
