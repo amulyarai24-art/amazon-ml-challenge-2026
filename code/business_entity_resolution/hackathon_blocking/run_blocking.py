@@ -28,8 +28,8 @@ def main():
     )
 
     # Output CSV for Person 1 (DL / Model training module)
-    output_path = "candidate_pairs.csv"
-    candidates.to_csv(output_path, index=False)
+    output_path = "candidate_pairs.tsv"
+    candidates.to_csv(output_path,sep="\t", index=False)
     print(f"[✔] Output exported successfully to '{output_path}'.")
 
 if __name__ == "__main__":
