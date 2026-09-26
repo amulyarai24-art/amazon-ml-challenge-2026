@@ -10,6 +10,8 @@ from typing import List, Dict
 from multilingual_normalization import normalize_multilingual_name, extract_international_postal
 from fellegi_sunter_engine import FellegiSunterEvidenceEngine
 from cascade_ranker import compute_structured_features, train_stage1_lightgbm
+from tripartite_graph_consensus import fit_calibrator_from_training_data
+from pathlib import Path
 from ditto_cross_encoder import DittoTransformerReranker
 from contrastive_focal_loss import MacroF05FocalContrastiveLoss
 
@@ -27,11 +29,10 @@ def run_training_pipeline(train_dir: str, model_dir: str, epochs: int = 3, batch
 
     print(f"[INFO] Loading training datasets from {train_dir}...")
     
-    # Fallback to synthetic training sample if dataset files are missing
-    if not os.path.exists(s1_path) or not os.path.exists(gt_path):
-        print("[WARNING] Dataset files not found in train_dir. Creating synthetic training weights for demo...")
-        _generate_default_weights(model_dir)
-        return
+    required = [s1_path, s2_path, s3_path, gt_path]
+    missing = [p for p in required if not os.path.exists(p)]
+    if missing:
+        raise FileNotFoundError("Training data is incomplete. Missing: " + ", ".join(missing))
 
     print("[INFO] Preprocessing training entity names and postal keys...")
     df_s1 = pl.read_csv(s1_path, separator="\t", ignore_errors=True)
@@ -48,12 +49,67 @@ def run_training_pipeline(train_dir: str, model_dir: str, epochs: int = 3, batch
     fs_engine.save_weights(fs_weight_path)
     print(f"[SUCCESS] Fellegi-Sunter weights saved to {fs_weight_path}")
 
-    print("[INFO] Constructing feature matrix for Stage 1 LightGBM Ranker...")
-    X_train = np.random.rand(100, 10).astype(np.float32)
-    y_train = np.random.choice([0, 1], size=100, p=[0.8, 0.2])
-    
+    print("[INFO] Building training features from labelled S1-S2 pairs...")
+    df_s2 = pl.read_csv(s2_path, separator="\t", ignore_errors=True)
+    df_gt = pl.read_csv(gt_path, separator="\t", ignore_errors=True)
+
+    def _find_col(df, names):
+        for name in names:
+            if name in df.columns:
+                return name
+        return None
+
+    s1_id_col = _find_col(df_s1, ["entity_id", "id", "source1_entity_id"])
+    s2_id_col = _find_col(df_s2, ["entity_id", "id", "source2_entity_id"])
+    gt_s1_col = _find_col(df_gt, ["source1_entity_id", "entity_id", "id"])
+    gt_s2_col = _find_col(df_gt, ["source2_entity_id", "matched_entity_id", "entity_id_2", "id_2"])
+    if not all([s1_id_col, s2_id_col, gt_s1_col, gt_s2_col]):
+        raise ValueError("Could not identify entity-id columns in training files.")
+
+    s1_rows = {str(row[s1_id_col]): row for row in df_s1.to_dicts()}
+    s2_rows = {str(row[s2_id_col]): row for row in df_s2.to_dicts()}
+
+    name_s1 = _find_col(df_s1, ["name_norm", "name_normalized", "business_name", "company_name", "name"])
+    name_s2 = _find_col(df_s2, ["name_norm", "name_normalized", "business_name", "company_name", "name"])
+    addr_s1 = _find_col(df_s1, ["address_norm", "address_normalized", "business_address", "address"])
+    addr_s2 = _find_col(df_s2, ["address_norm", "address_normalized", "business_address", "address"])
+    post_s1 = _find_col(df_s1, ["postal", "postal_code", "zip", "postcode"])
+    post_s2 = _find_col(df_s2, ["postal", "postal_code", "zip", "postcode"])
+
+    def _rec(row, name_col, addr_col, post_col):
+        return {"name_norm": row.get(name_col, "") if name_col else "",
+                "address_norm": row.get(addr_col, "") if addr_col else "",
+                "postal": row.get(post_col, "") if post_col else ""}
+
+    positives = set()
+    for row in df_gt.to_dicts():
+        sid, cid = str(row[gt_s1_col]), str(row[gt_s2_col])
+        if sid in s1_rows and cid in s2_rows:
+            positives.add((sid, cid))
+
+    X_rows, y_rows, raw_scores = [], [], []
+    for sid, cid in positives:
+        feat = compute_structured_features(_rec(s1_rows[sid], name_s1, addr_s1, post_s1),
+                                           _rec(s2_rows[cid], name_s2, addr_s2, post_s2))
+        X_rows.append(feat); y_rows.append(1); raw_scores.append(float(feat[0]))
+
+    for sid in s1_rows:
+        for cid in [x for x in s2_rows if (sid, x) not in positives][:2]:
+            feat = compute_structured_features(_rec(s1_rows[sid], name_s1, addr_s1, post_s1),
+                                               _rec(s2_rows[cid], name_s2, addr_s2, post_s2))
+            X_rows.append(feat); y_rows.append(0); raw_scores.append(float(feat[0]))
+
+    if len(set(y_rows)) < 2:
+        raise ValueError("Training ground truth must contain both positive and negative examples.")
+
+    X_train = np.asarray(X_rows, dtype=np.float32)
+    y_train = np.asarray(y_rows, dtype=np.int32)
     lgb_save_path = os.path.join(model_dir, "lgbm_stage1_ranker.txt")
     train_stage1_lightgbm(X_train, y_train, lgb_save_path)
+
+    calibrator_path = os.path.join(model_dir, "isotonic_calibrator.pkl")
+    fit_calibrator_from_training_data(raw_scores, y_train, Path(calibrator_path))
+    print(f"[SUCCESS] Isotonic calibrator saved to {calibrator_path}")
 
     print("[INFO] Initializing Stage 2 Ditto Cross-Encoder Transformer & Focal Loss...")
     ditto_model = DittoTransformerReranker()
@@ -101,8 +157,8 @@ def _generate_default_weights(model_dir: str):
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser(description="Train Business Entity Resolution Models")
-    parser.add_argument("--train_dir", type=str, default="../../dataset/train", help="Path to training dataset folder")
-    parser.add_argument("--model_dir", type=str, default="../../models", help="Path to save trained model weights")
+    parser.add_argument("--train_dir", type=str, default="../dataset/train", help="Path to training dataset folder")
+    parser.add_argument("--model_dir", type=str, default="../models", help="Path to save trained model weights")
     parser.add_argument("--epochs", type=int, default=3, help="Number of transformer training epochs")
     parser.add_argument("--batch_size", type=int, default=32, help="Batch size for training")
     
