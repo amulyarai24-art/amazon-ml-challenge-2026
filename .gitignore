@@ -1,9 +1,11 @@
 __pycache__/
 *.py[cod]
 venv/
-dataset/train/*.tsv
-dataset/test/*.tsv
 models/*.pt
 models/*.bin
 output/*.tsv
 !.gitkeep
+**/data/processed/
+**/dataset/train/*.tsv
+**/dataset/test/*.tsv
+**/.DS_Store
