@@ -10,11 +10,15 @@ class MultiViewMultilingualBlocker:
     def fit_candidates(self, candidate_records: List[dict]):
         for rec in candidate_records:
             cid = rec['entity_id']
-            if rec.get('name_norm'): self.name_index[rec['name_norm']].append(cid)
-            if rec.get('postal'): self.postal_index[rec['postal']].append(cid)
+            name = rec.get('name_norm') or rec.get('name_normalized') or rec.get('business_name') or rec.get('company_name')
+            postal = rec.get('postal') or rec.get('postal_code')
+            if name: self.name_index[str(name)].append(cid)
+            if postal: self.postal_index[str(postal)].append(cid)
 
     def retrieve_candidates(self, s1_rec: dict) -> List[str]:
         candidates: Set[str] = set()
-        if s1_rec.get('name_norm') in self.name_index: candidates.update(self.name_index[s1_rec['name_norm']])
-        if s1_rec.get('postal') in self.postal_index: candidates.update(self.postal_index[s1_rec['postal']])
+        name = s1_rec.get('name_norm') or s1_rec.get('name_normalized') or s1_rec.get('business_name') or s1_rec.get('company_name')
+        postal = s1_rec.get('postal') or s1_rec.get('postal_code')
+        if name is not None: candidates.update(self.name_index.get(str(name), []))
+        if postal is not None: candidates.update(self.postal_index.get(str(postal), []))
         return list(candidates)[:self.max_candidates]
