@@ -28,14 +28,20 @@ def main():
     base_dir = os.path.dirname(os.path.abspath(__file__))
     df_s1 = _load_processed(base_dir, "s1")
     df_s2 = _load_processed(base_dir, "s2")
+    df_s3 = _load_processed(base_dir, "s3")
 
     s1_id = _pick_column(df_s1, ["entity_id", "id", "source1_entity_id"], "Source-1 id")
     s2_id = _pick_column(df_s2, ["entity_id", "id", "source2_entity_id"], "Source-2 id")
+    s3_id = _pick_column(df_s3, ["entity_id", "id", "source3_entity_id"], "Source-3 id")
     name_s1 = _pick_column(df_s1, ["name_norm", "name_normalized", "company_name", "business_name", "name"], "Source-1 name")
     name_s2 = _pick_column(df_s2, ["name_norm", "name_normalized", "company_name", "business_name", "name"], "Source-2 name")
+    name_s3 = _pick_column(df_s3, ["name_norm", "name_normalized", "company_name", "business_name", "name"], "Source-3 name")
 
     left = df_s1[[s1_id, name_s1]].rename(columns={s1_id: "entity_id", name_s1: "match_name"})
-    right = df_s2[[s2_id, name_s2]].rename(columns={s2_id: "entity_id", name_s2: "match_name"})
+    right = pd.concat([
+        df_s2[[s2_id, name_s2]].rename(columns={s2_id: "entity_id", name_s2: "match_name"}),
+        df_s3[[s3_id, name_s3]].rename(columns={s3_id: "entity_id", name_s3: "match_name"}),
+    ], ignore_index=True)
 
     blocker = EntityBlocker(prefix_len=3, top_k=5)
     pairs = blocker.generate_candidate_pairs(left, right, "match_name", "entity_id", "entity_id")
