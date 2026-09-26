@@ -1,0 +1,11 @@
+__pycache__/
+*.py[cod]
+venv/
+models/*.pt
+models/*.bin
+output/*.tsv
+!.gitkeep
+**/data/processed/
+**/dataset/train/*.tsv
+**/dataset/test/*.tsv
+**/.DS_Store
