@@ -97,6 +97,31 @@ def run_pipeline(dataset_dir: str, output_dir: str) -> None:
     if not raw_scores:
         raise ValueError("candidate_scores.tsv contains no scores; run the matching stage before graph consensus.")
 
+    # Every non-empty final candidate must have a matcher score. Never silently
+    # turn a missing score into 0.0 because that can hide an integration bug.
+    missing_scores = []
+    for s1_id, candidate_ids in candidate_pairs.items():
+        for cid in candidate_ids:
+            if cid and cid not in raw_scores.get(s1_id, {}):
+                missing_scores.append((s1_id, cid))
+    if missing_scores:
+        sample = ", ".join(f"{sid}->{cid}" for sid, cid in missing_scores[:5])
+        raise ValueError(
+            f"candidate_scores.tsv is missing {len(missing_scores)} candidate score(s); "
+            f"examples: {sample}"
+        )
+
+    # Load the same thresholds produced during model training.
+    calibration_path = output_path.parent / "models" / "calibration_params.json"
+    confidence_threshold = 0.5
+    margin_threshold = 0.18
+    if calibration_path.exists():
+        import json
+        with open(calibration_path, "r", encoding="utf-8") as fh:
+            params = json.load(fh)
+        confidence_threshold = float(params.get("confidence_threshold", confidence_threshold))
+        margin_threshold = float(params.get("margin_threshold", margin_threshold))
+
     # Calibrate the S2<->S3 consistency scores with the same isotonic model
     # so they live on the same probability scale as the S1<->candidate scores.
     calibrated_s2_s3: Dict[FrozenSet[str], float] = {}
@@ -105,7 +130,7 @@ def run_pipeline(dataset_dir: str, output_dir: str) -> None:
         calibrated_values = calibrate_probabilities([raw_s2_s3_scores[k] for k in keys])
         calibrated_s2_s3 = dict(zip(keys, calibrated_values))
 
-    consensus = TripartiteGraphConsensus(cross_source_scores=calibrated_s2_s3)
+    consensus = TripartiteGraphConsensus(\n        cross_source_scores=calibrated_s2_s3,\n        min_score_threshold=confidence_threshold,\n        margin_threshold=margin_threshold,\n    )
 
     results_rows: List[Tuple[str, str]] = []
     for s1_id in s1_ids:
@@ -114,7 +139,7 @@ def run_pipeline(dataset_dir: str, output_dir: str) -> None:
 
         candidate_scores: List[dict] = []
         if candidate_ids:
-            raw_values = [scores_for_s1.get(cid, 0.0) for cid in candidate_ids]
+            raw_values = [scores_for_s1[cid] for cid in candidate_ids]
             calibrated_values = calibrate_probabilities(raw_values)
             candidate_scores = [
                 {"entity_id": cid, "score": float(prob)}
