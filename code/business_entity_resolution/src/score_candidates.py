@@ -1,7 +1,7 @@
 """Score real blocked candidate pairs with the trained LightGBM matcher.
 
-Run from code/business_entity_resolution:
-    python src/score_candidates.py --dataset-dir ../dataset --output-dir ../output --model-dir ../models
+Run from code/business_entity_resolution/src:
+    python score_candidates.py --dataset-dir ../dataset --output-dir ../output --model-dir ../models
 """
 
 from __future__ import annotations
