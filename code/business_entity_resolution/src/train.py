@@ -2,7 +2,6 @@ import os
 import sys
 import argparse
 import json
-import torch
 import numpy as np
 import polars as pl
 from typing import List, Dict
@@ -12,8 +11,6 @@ from fellegi_sunter_engine import FellegiSunterEvidenceEngine
 from cascade_ranker import compute_structured_features, train_stage1_lightgbm
 from tripartite_graph_consensus import fit_calibrator_from_training_data
 from pathlib import Path
-from ditto_cross_encoder import DittoTransformerReranker
-from contrastive_focal_loss import MacroF05FocalContrastiveLoss
 
 def run_training_pipeline(train_dir: str, model_dir: str, epochs: int = 3, batch_size: int = 32):
     print("==================================================")
@@ -154,15 +151,6 @@ def run_training_pipeline(train_dir: str, model_dir: str, epochs: int = 3, batch
         val_raw_scores, y_val, Path(calibrator_path)
     )
     print(f"[SUCCESS] Isotonic calibrator saved to {calibrator_path}")
-
-    print("[INFO] Initializing Stage 2 Ditto Cross-Encoder Transformer & Focal Loss...")
-    ditto_model = DittoTransformerReranker()
-    loss_fn = MacroF05FocalContrastiveLoss(lambda_precision=2.0)
-    
-    ditto_save_dir = os.path.join(model_dir, "ditto_stage2_transformer")
-    os.makedirs(ditto_save_dir, exist_ok=True)
-    torch.save(ditto_model.state_dict(), os.path.join(ditto_save_dir, "pytorch_model.bin"))
-    print(f"[SUCCESS] Ditto Transformer weights saved to {ditto_save_dir}")
 
     print("[INFO] Saving calibrated decision thresholds...")
     calib_params = {
