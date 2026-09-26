@@ -54,6 +54,8 @@ def score_candidates(dataset_dir: str, output_dir: str, model_dir: str) -> None:
 
     s1 = _records(dataset / "test" / "test_source1.tsv")
     s2 = _records(dataset / "test" / "test_source2.tsv")
+    s3 = _records(dataset / "test" / "test_source3.tsv")
+    candidates = {**s2, **s3}
     candidate_path = output / "candidate_pairs.tsv"
     model_path = models / "lgbm_stage1_ranker.txt"
 
@@ -77,9 +79,9 @@ def score_candidates(dataset_dir: str, output_dir: str, model_dir: str) -> None:
             raise ValueError(f"Candidate file references unknown S1 ID: {sid}")
 
         for cid in candidate_ids:
-            if cid not in s2:
-                raise ValueError(f"Candidate file references unknown S2 ID: {cid}")
-            features = compute_structured_features(s1[sid], s2[cid]).reshape(1, -1)
+            if cid not in candidates:
+                raise ValueError(f"Candidate file references unknown S2/S3 ID: {cid}")
+            features = compute_structured_features(s1[sid], candidates[cid]).reshape(1, -1)
             raw_score = float(model.predict(features)[0])
             scored.append((sid, cid, raw_score))
 
