@@ -94,6 +94,8 @@ def run_pipeline(dataset_dir: str, output_dir: str) -> None:
     candidate_pairs = _load_candidate_pairs(output_path)
     raw_scores = _load_raw_scores(output_path)
     raw_s2_s3_scores = _load_s2_s3_scores(output_path)
+    if not raw_scores:
+        raise ValueError("candidate_scores.tsv contains no scores; run the matching stage before graph consensus.")
 
     # Calibrate the S2<->S3 consistency scores with the same isotonic model
     # so they live on the same probability scale as the S1<->candidate scores.
