@@ -37,6 +37,7 @@ def clean_dataframe(df, name_col="business_name", addr_col="business_address"):
     if name_col in df.columns:
         df["name_normalized"] = df[name_col].apply(normalize_text)
         df["name_tokens"] = df["name_normalized"].apply(tokenize)
+        df["name_norm"] = df["name_normalized"].fillna("")
     else:
         print(f"Warning: name column '{name_col}' not found")
 
@@ -44,6 +45,8 @@ def clean_dataframe(df, name_col="business_name", addr_col="business_address"):
         df["postal_code"] = df[addr_col].apply(extract_postal_code)
         df["address_normalized"] = df[addr_col].apply(normalize_text)
         df["address_tokens"] = df["address_normalized"].apply(tokenize)
+        df["address_norm"] = df["address_normalized"].fillna("")
+        df["postal"] = df["postal_code"].fillna("").astype(str)
     else:
         print(f"Warning: address column '{addr_col}' not found")
 
