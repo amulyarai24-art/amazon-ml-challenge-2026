@@ -96,7 +96,7 @@ def score_candidates(dataset_dir: str, output_dir: str, model_dir: str) -> None:
 
 
 if __name__ == "__main__":
-    parser = argparse.ArgumentParser(description="Score blocked S1-S2 candidate pairs.")
+    parser = argparse.ArgumentParser(description="Score blocked S1-S2/S3 candidate pairs.")
     parser.add_argument("--dataset-dir", required=True)
     parser.add_argument("--output-dir", required=True)
     parser.add_argument("--model-dir", required=True)
