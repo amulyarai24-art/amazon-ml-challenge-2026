@@ -34,6 +34,8 @@ class EntityBlocker:
         """
         print(f"[*] Starting candidate pair generation for {len(df_a)} x {len(df_b)} records...")
         start_time = time.time()
+        if df_a.empty or df_b.empty:
+            return pd.DataFrame(columns=[f"{id_col_a}_a", f"{id_col_b}_b", "left_index", "right_index"])
 
         # Step 1: Clean & Normalize
         norm_a = self._normalize_series(df_a[match_col])
@@ -71,7 +73,7 @@ class EntityBlocker:
             for idx_b in row_indices:
                 knn_tuple_list.append((idx_a, idx_b))
 
-        knn_pairs = pd.MultiIndex.from_tuples(knn_tuple_list, names=prefix_pairs.names)
+        knn_pairs = pd.MultiIndex.from_tuples(knn_tuple_list, names=["left_index", "right_index"])
         print(f"    -> TF-IDF KNN identified {len(knn_pairs):,} candidate pairs.")
 
         # Step 4: Union & Deduplicate Candidate Pairs
