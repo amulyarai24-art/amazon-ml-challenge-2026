@@ -1,37 +1,43 @@
+import os
 import pandas as pd
 from src.blocking import EntityBlocker
 
 def main():
-    # Replace these sample dataframes with your actual hackathon datasets!
-    data_a = {
-        'id': [101, 102, 103, 104],
-        'company_name': ['Acme Corp', 'Google LLC', 'Microsoft Corporation', 'Amazon Inc']
-    }
-    data_b = {
-        'id': [201, 202, 203, 204],
-        'company_name': ['Akme Corporation', 'Google', 'Micro soft Corp', 'Apple Inc']
-    }
+    # 1. Define paths to Person 1's cleaned datasets
+    base_dir = os.path.dirname(os.path.abspath(__file__))
+    data_dir = os.path.join(base_dir, "data", "processed")
+    
+    s1_path = os.path.join(data_dir, "s1_clean.tsv")
+    s2_path = os.path.join(data_dir, "s2_clean.tsv")
 
-    df_left = pd.DataFrame(data_a)
-    df_right = pd.DataFrame(data_b)
+    # 2. Check if Person 1's cleaned files exist
+    if not os.path.exists(s1_path) or not os.path.exists(s2_path):
+        print(f"[!] Error: Could not find clean data files at '{data_dir}'.")
+        print("Please run 'git pull origin main' to fetch Person 1's cleaned datasets from GitHub.")
+        return
 
-    # Initialize Blocker
+    # 3. Load Person 1's processed datasets
+    print("[*] Loading cleaned datasets...")
+    df_s1 = pd.read_csv(s1_path, sep="\t")
+    df_s2 = pd.read_csv(s2_path, sep="\t")
+
+    # 4. Initialize Blocker
     blocker = EntityBlocker(prefix_len=3, top_k=2)
     
-    # Run Candidate Pair Generation
+    # 5. Run Candidate Pair Generation on full dataset
+    print("[*] Generating candidate pairs...")
     candidates = blocker.generate_candidate_pairs(
-        df_a=df_left, 
-        df_b=df_right, 
-        match_col='company_name',
+        df_a=df_s1, 
+        df_b=df_s2, 
+        match_col='company_name',  # Adjust column name if Person 1 named it differently (e.g., 'name')
         id_col_a='id',
         id_col_b='id'
     )
 
-    # Output CSV for Person 1 (DL / Model training module)
+    # 6. Export output TSV for Person 3 & Person 4
     output_path = "candidate_pairs.tsv"
-    candidates.to_csv(output_path,sep="\t", index=False)
-    print(f"[✔] Output exported successfully to '{output_path}'.")
+    candidates.to_csv(output_path, sep="\t", index=False)
+    print(f"[✓] Output exported successfully to '{output_path}'.")
 
 if __name__ == "__main__":
     main()
-    
