@@ -1,12 +1,9 @@
 import os
-import sys
 import argparse
 import json
 import numpy as np
 import polars as pl
-from typing import List, Dict
 
-from multilingual_normalization import normalize_multilingual_name, extract_international_postal
 from fellegi_sunter_engine import FellegiSunterEvidenceEngine
 from cascade_ranker import compute_structured_features, train_stage1_lightgbm
 from tripartite_graph_consensus import fit_calibrator_from_training_data
@@ -46,7 +43,7 @@ def run_training_pipeline(train_dir: str, model_dir: str, epochs: int = 3, batch
     fs_engine.save_weights(fs_weight_path)
     print(f"[SUCCESS] Fellegi-Sunter weights saved to {fs_weight_path}")
 
-    print("[INFO] Building training features from labelled S1-S2 pairs...")
+    print("[INFO] Building training features from labelled S1-S2/S3 pairs...")
     df_s2 = pl.read_csv(s2_path, separator="\t", ignore_errors=True)
     df_s3 = pl.read_csv(s3_path, separator="\t", ignore_errors=True)
     df_gt = pl.read_csv(gt_path, separator="\t", ignore_errors=True)
@@ -163,6 +160,12 @@ def run_training_pipeline(train_dir: str, model_dir: str, epochs: int = 3, batch
         )
     )
 
+    # Validation above is used only for model selection/QA. After that check,
+    # retrain the final matcher on all labelled pairs so no training examples
+    # are discarded from the submission model.
+    print("[INFO] Retraining final LightGBM matcher on all labelled training pairs...")
+    model = train_stage1_lightgbm(X, y, lgb_save_path)
+
     # Calibrate the model's actual raw predictions, not an individual feature.
     calibrator_path = os.path.join(model_dir, "isotonic_calibrator.pkl")
     fit_calibrator_from_training_data(
@@ -183,34 +186,12 @@ def run_training_pipeline(train_dir: str, model_dir: str, epochs: int = 3, batch
     print(f"[SUCCESS] Calibration parameters saved to {calib_path}")
     print("\n[COMPLETE] Model training finished successfully! All weights saved in models/.")
 
-def _generate_default_weights(model_dir: str):
-    fs_weight_path = os.path.join(model_dir, "fellegi_sunter_weights.json")
-    with open(fs_weight_path, "w", encoding="utf-8") as f:
-        json.dump({
-            "m_probs": {"exact_name": 0.95, "exact_postal": 0.88},
-            "u_probs": {"exact_name": 0.01, "exact_postal": 0.02},
-            "weights": {"exact_name": 6.57, "exact_postal": 5.45}
-        }, f, indent=2)
-        
-    lgb_save_path = os.path.join(model_dir, "lgbm_stage1_ranker.txt")
-    with open(lgb_save_path, "w", encoding="utf-8") as f:
-        f.write("# LightGBM Model File\nversion=v3\n")
-        
-    ditto_save_dir = os.path.join(model_dir, "ditto_stage2_transformer")
-    os.makedirs(ditto_save_dir, exist_ok=True)
-    with open(os.path.join(ditto_save_dir, "config.json"), "w") as f:
-        json.dump({"model_type": "distilbert"}, f)
-        
-    calib_path = os.path.join(model_dir, "calibration_params.json")
-    with open(calib_path, "w", encoding="utf-8") as f:
-        json.dump({"confidence_threshold": 0.72, "margin_threshold": 0.18}, f, indent=2)
-
 if __name__ == "__main__":
     parser = argparse.ArgumentParser(description="Train Business Entity Resolution Models")
     parser.add_argument("--train_dir", type=str, default="../dataset/train", help="Path to training dataset folder")
     parser.add_argument("--model_dir", type=str, default="../models", help="Path to save trained model weights")
-    parser.add_argument("--epochs", type=int, default=3, help="Number of transformer training epochs")
-    parser.add_argument("--batch_size", type=int, default=32, help="Batch size for training")
+    parser.add_argument("--epochs", type=int, default=3, help="Unused compatibility argument; retained for CLI compatibility")
+    parser.add_argument("--batch_size", type=int, default=32, help="Unused compatibility argument; retained for CLI compatibility")
     
     args = parser.parse_args()
     run_training_pipeline(args.train_dir, args.model_dir, args.epochs, args.batch_size)
