@@ -130,7 +130,11 @@ def run_pipeline(dataset_dir: str, output_dir: str) -> None:
         calibrated_values = calibrate_probabilities([raw_s2_s3_scores[k] for k in keys])
         calibrated_s2_s3 = dict(zip(keys, calibrated_values))
 
-    consensus = TripartiteGraphConsensus(\n        cross_source_scores=calibrated_s2_s3,\n        min_score_threshold=confidence_threshold,\n        margin_threshold=margin_threshold,\n    )
+    consensus = TripartiteGraphConsensus(
+        cross_source_scores=calibrated_s2_s3,
+        min_score_threshold=confidence_threshold,
+        margin_threshold=margin_threshold,
+    )
 
     results_rows: List[Tuple[str, str]] = []
     for s1_id in s1_ids:
