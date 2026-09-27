@@ -71,15 +71,19 @@ def run_training_pipeline(train_dir: str, model_dir: str, epochs: int = 3, batch
     addr_s1 = _find_col(df_s1, ["address_norm", "address_normalized", "business_address", "address"])
     addr_s2 = _find_col(df_s2, ["address_norm", "address_normalized", "business_address", "address"])
     post_s1 = _find_col(df_s1, ["postal", "postal_code", "zip", "postcode"])
+    country_s1 = _find_col(df_s1, ["country", "country_code"])
     post_s2 = _find_col(df_s2, ["postal", "postal_code", "zip", "postcode"])
+    country_s2 = _find_col(df_s2, ["country", "country_code"])
     name_s3 = _find_col(df_s3, ["name_norm", "name_normalized", "business_name", "company_name", "name"])
     addr_s3 = _find_col(df_s3, ["address_norm", "address_normalized", "business_address", "address"])
     post_s3 = _find_col(df_s3, ["postal", "postal_code", "zip", "postcode"])
+    country_s3 = _find_col(df_s3, ["country", "country_code"])
 
-    def _rec(row, name_col, addr_col, post_col):
+    def _rec(row, name_col, addr_col, post_col, country_col):
         return {"name_norm": row.get(name_col, "") if name_col else "",
                 "address_norm": row.get(addr_col, "") if addr_col else "",
-                "postal": row.get(post_col, "") if post_col else ""}
+                "postal": row.get(post_col, "") if post_col else "",
+                "country": row.get(country_col, "") if country_col else ""}
 
     # The official ground truth stores comma-separated S2/S3 matches.
     positives = set()
@@ -99,9 +103,9 @@ def run_training_pipeline(train_dir: str, model_dir: str, epochs: int = 3, batch
 
     def _candidate_rec(cid):
         if cid in s2_rows:
-            return _rec(s2_rows[cid], name_s2, addr_s2, post_s2)
+            return _rec(s2_rows[cid], name_s2, addr_s2, post_s2, country_s2)
         if cid in s3_rows:
-            return _rec(s3_rows[cid], name_s3, addr_s3, post_s3)
+            return _rec(s3_rows[cid], name_s3, addr_s3, post_s3, country_s3)
         return None
 
     for sid, cid in positives:
@@ -109,7 +113,7 @@ def run_training_pipeline(train_dir: str, model_dir: str, epochs: int = 3, batch
         if cand is None:
             continue
         feat = compute_structured_features(
-            _rec(s1_rows[sid], name_s1, addr_s1, post_s1), cand
+            _rec(s1_rows[sid], name_s1, addr_s1, post_s1, country_s1), cand
         )
         X_rows.append(feat)
         y_rows.append(1)
@@ -168,15 +172,27 @@ def run_training_pipeline(train_dir: str, model_dir: str, epochs: int = 3, batch
 
     # Calibrate the model's actual raw predictions, not an individual feature.
     calibrator_path = os.path.join(model_dir, "isotonic_calibrator.pkl")
-    fit_calibrator_from_training_data(
-        val_raw_scores, y_val, Path(calibrator_path)
-    )
     print(f"[SUCCESS] Isotonic calibrator saved to {calibrator_path}")
 
-    print("[INFO] Saving calibrated decision thresholds...")
+    print("[INFO] Tuning the decision threshold on held-out validation scores...")
+    calibrator = fit_calibrator_from_training_data(
+        val_raw_scores, y_val, Path(calibrator_path)
+    )
+    calibrated_val = calibrator.transform(val_raw_scores)
+
+    best_threshold = 0.85
+    best_f05 = -1.0
+    for threshold in np.arange(0.50, 0.96, 0.01):
+        pred = (calibrated_val >= threshold).astype(np.int32)
+        score = fbeta_score(y_val, pred, beta=0.5, zero_division=0)
+        if score > best_f05:
+            best_f05 = float(score)
+            best_threshold = float(threshold)
+
+    print(f"[VALIDATION] Best pairwise F0.5 threshold={best_threshold:.2f}, F0.5={best_f05:.4f}")
     calib_params = {
-        "confidence_threshold": 0.72,
-        "margin_threshold": 0.18,
+        "confidence_threshold": best_threshold,
+        "margin_threshold": 0.10,
         "lambda_precision": 2.0
     }
     calib_path = os.path.join(model_dir, "calibration_params.json")
