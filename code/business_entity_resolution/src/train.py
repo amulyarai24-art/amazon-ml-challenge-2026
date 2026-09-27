@@ -118,22 +118,40 @@ def run_training_pipeline(train_dir: str, model_dir: str, epochs: int = 3, batch
         X_rows.append(feat)
         y_rows.append(1)
 
-    # Sample negatives from both S2 and S3 while excluding all known matches.
+    # Mine harder negatives from targets that are known positives for other
+    # S1 entities, then add a small random sample.
     rng = np.random.default_rng(42)
     target_ids = list(s2_rows.keys()) + list(s3_rows.keys())
+    positive_target_ids = list({cid for _, cid in positives})
+
     for sid in s1_rows:
-        available = [cid for cid in target_ids if cid not in positive_by_s1.get(sid, set())]
-        if not available:
-            continue
-        for cid in rng.choice(available, size=min(4, len(available)), replace=False):
+        own_matches = positive_by_s1.get(sid, set())
+        hard_pool = [cid for cid in positive_target_ids if cid not in own_matches]
+        hard_n = min(2, len(hard_pool))
+        hard_ids = rng.choice(hard_pool, size=hard_n, replace=False) if hard_n else []
+
+        for cid in hard_ids:
             cand = _candidate_rec(cid)
             if cand is None:
                 continue
             feat = compute_structured_features(
-                _rec(s1_rows[sid], name_s1, addr_s1, post_s1), cand
+                _rec(s1_rows[sid], name_s1, addr_s1, post_s1, country_s1), cand
             )
             X_rows.append(feat)
             y_rows.append(0)
+
+        available = [cid for cid in target_ids if cid not in own_matches]
+        random_n = min(2, len(available))
+        if random_n:
+            for cid in rng.choice(available, size=random_n, replace=False):
+                cand = _candidate_rec(cid)
+                if cand is None:
+                    continue
+                feat = compute_structured_features(
+                    _rec(s1_rows[sid], name_s1, addr_s1, post_s1, country_s1), cand
+                )
+                X_rows.append(feat)
+                y_rows.append(0)
 
     if len(set(y_rows)) < 2:
         raise ValueError("Training ground truth must contain both positive and negative examples.")
