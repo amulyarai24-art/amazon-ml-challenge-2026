@@ -126,9 +126,14 @@ def run_training_pipeline(train_dir: str, model_dir: str, epochs: int = 3, batch
 
     for sid in s1_rows:
         own_matches = positive_by_s1.get(sid, set())
-        hard_pool = [cid for cid in positive_target_ids if cid not in own_matches]
-        hard_n = min(2, len(hard_pool))
-        hard_ids = rng.choice(hard_pool, size=hard_n, replace=False) if hard_n else []
+        hard_ids = []
+        if positive_target_ids:
+            attempts = 0
+            while len(hard_ids) < 2 and attempts < 10:
+                cid = positive_target_ids[int(rng.integers(0, len(positive_target_ids)))]
+                if cid not in own_matches and cid not in hard_ids:
+                    hard_ids.append(cid)
+                attempts += 1
 
         for cid in hard_ids:
             cand = _candidate_rec(cid)
