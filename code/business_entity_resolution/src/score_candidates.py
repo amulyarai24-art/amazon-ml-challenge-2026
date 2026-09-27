@@ -34,6 +34,7 @@ def _records(path: Path):
     name_col = _find_col(df, ["name_norm", "name_normalized", "business_name", "company_name", "name"])
     addr_col = _find_col(df, ["address_norm", "address_normalized", "business_address", "address"])
     post_col = _find_col(df, ["postal", "postal_code", "zip", "postcode"])
+    country_col = _find_col(df, ["country", "country_code"])
     if not id_col:
         raise ValueError(f"Could not identify entity ID column in {path}")
 
@@ -43,6 +44,7 @@ def _records(path: Path):
             "name_norm": row.get(name_col, "") if name_col else "",
             "address_norm": row.get(addr_col, "") if addr_col else "",
             "postal": row.get(post_col, "") if post_col else "",
+            "country": row.get(country_col, "") if country_col else "",
         }
     return rows
 
