@@ -145,18 +145,23 @@ def run_training_pipeline(train_dir: str, model_dir: str, epochs: int = 3, batch
             X_rows.append(feat)
             y_rows.append(0)
 
-        available = [cid for cid in target_ids if cid not in own_matches]
-        random_n = min(2, len(available))
-        if random_n:
-            for cid in rng.choice(available, size=random_n, replace=False):
-                cand = _candidate_rec(cid)
-                if cand is None:
-                    continue
-                feat = compute_structured_features(
-                    _rec(s1_rows[sid], name_s1, addr_s1, post_s1, country_s1), cand
-                )
-                X_rows.append(feat)
-                y_rows.append(0)
+        random_ids = []
+        attempts = 0
+        while len(random_ids) < 2 and attempts < 10 and target_ids:
+            cid = target_ids[int(rng.integers(0, len(target_ids)))]
+            if cid not in own_matches and cid not in random_ids:
+                random_ids.append(cid)
+            attempts += 1
+
+        for cid in random_ids:
+            cand = _candidate_rec(cid)
+            if cand is None:
+                continue
+            feat = compute_structured_features(
+                _rec(s1_rows[sid], name_s1, addr_s1, post_s1, country_s1), cand
+            )
+            X_rows.append(feat)
+            y_rows.append(0)
 
     if len(set(y_rows)) < 2:
         raise ValueError("Training ground truth must contain both positive and negative examples.")
