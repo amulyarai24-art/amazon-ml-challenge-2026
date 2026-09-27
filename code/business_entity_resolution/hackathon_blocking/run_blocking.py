@@ -38,13 +38,15 @@ def main():
     name_s3 = _pick_column(df_s3, ["name_norm", "name_normalized", "company_name", "business_name", "name"], "Source-3 name")
 
     left = df_s1[[s1_id, name_s1]].rename(columns={s1_id: "entity_id", name_s1: "match_name"})
-    right = pd.concat([
-        df_s2[[s2_id, name_s2]].rename(columns={s2_id: "entity_id", name_s2: "match_name"}),
-        df_s3[[s3_id, name_s3]].rename(columns={s3_id: "entity_id", name_s3: "match_name"}),
-    ], ignore_index=True)
+    right_s2 = df_s2[[s2_id, name_s2]].rename(columns={s2_id: "entity_id", name_s2: "match_name"})
+    right_s3 = df_s3[[s3_id, name_s3]].rename(columns={s3_id: "entity_id", name_s3: "match_name"})
 
-    blocker = EntityBlocker(prefix_len=3, top_k=5)
-    pairs = blocker.generate_candidate_pairs(left, right, "match_name", "entity_id", "entity_id")
+    # Block S2 and S3 separately so one source cannot consume the entire
+    # top-k budget of the other source.
+    blocker = EntityBlocker(prefix_len=3, top_k=8)
+    pairs_s2 = blocker.generate_candidate_pairs(left, right_s2, "match_name", "entity_id", "entity_id")
+    pairs_s3 = blocker.generate_candidate_pairs(left, right_s3, "match_name", "entity_id", "entity_id")
+    pairs = pd.concat([pairs_s2, pairs_s3], ignore_index=True)
 
     grouped = (
         pairs.groupby("entity_id_a")["entity_id_b"]
